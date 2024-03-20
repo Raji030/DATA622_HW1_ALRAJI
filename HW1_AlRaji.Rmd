@@ -1,0 +1,443 @@
+---
+title: "HW1_Data622"
+author: "Mahmud Hasan Al Raji"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The main goal of this assignment is to investigate two datasets to identify suitable machine learning algorithms learned so far that can be effectively applied to analyze the data. Furthermore, the assignment seeks to address various inquiries concerning the influence of correlations among variables, categorical labels on algorithm selection, the advantages and disadvantages of the chosen algorithms, the correlation between algorithm choice and dataset characteristics, the reliability of results for making business decisions, and the possibility of errors in the analysis. 
+
+In this assignment, I have used two datasets collected from Kaggle.com, both containing information on housing prices in the USA. The reason behind choosing these datasets was to predict house prices, understand the dynamics of factors affecting them, and gain insights into the importance of selecting modeling techniques applicable to dataset characteristics. The dataset links are: https://www.kaggle.com/datasets/neerajkld/realtor-real-estate-usa?resource=download, and   https://www.kaggle.com/code/syedali110/house-price-prediction-and-visualization/input.
+
+
+# Required libraries
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(randomForest)
+```
+
+# Get the first dataset
+
+```{r}
+house_price1<-read.csv("F:\\CUNY masters\\Data 622\\HW1\\realtor-data.zip.csv",header=TRUE,sep=",")
+```
+
+# Data exploration
+
+```{r}
+# See first house price dataset at a glance 
+glimpse(house_price1)
+
+# Summary statistics of the first house price dataset
+print(summary(house_price1))
+
+# See missing values in  the first dataset separately 
+missing_values <- colSums(is.na(house_price1))
+print(missing_values)
+
+unique_states<-unique(house_price1$state)
+print(unique_states)
+
+num_unique_states <- length(unique_states)
+print(num_unique_states)
+
+unique_city<-unique(house_price1$city)
+#unique_city
+
+num_unique_city <- length(unique_city)
+print(num_unique_city)
+
+unique_status<-unique(house_price1$status)
+unique_status
+```
+The Realtor company's real estate dataset has 110,101 observations of 10 housing features.The dataset has 7 numerical variables and 3 categorical variables.This dataset has missing values for 9 variables, with ‘previous sold date’ having the highest number of missing entries (almost 50% data missing) and ‘price’ the fewest (0.016% data missing).The dataset contains house prices for 2488 US cities, towns and adjacent areas from 18 US states (include 2 US territories). The house sale status variable has two categories: for sale and ready to build. The average number of beds and bathrooms are 3.31 and 2.52 respectively, the average house size is 2158 square feet, the average lot size is 18.18 acres, and the average house price is $914077. The spread of each numerical variable seems very large in the dataset. 
+
+```{r}
+# Plot histogram of the target variable 'price' of the first dataset
+log_price<-log(house_price1$price)
+hist(log_price, 
+     main = "Histogram of Log-Price", 
+     xlab = "Price", 
+     ylab = "Frequency")
+
+# Select numerical predictors from the first dataset
+numerical_predictors <- c("bed", "bath", "acre_lot", "house_size","zip_code")
+
+# Create matrix layout for plots
+plot_matrix <- lapply(numerical_predictors, function(predictor) {
+  ggplot(house_price1, aes_string(x = predictor, y = "price")) +
+    geom_point() +
+    labs(title = paste("Scatter plot of", predictor, "vs. price"),
+         x = predictor,
+         y = "Price")
+})
+
+# Create scatter plots in a single plot 
+gridExtra::grid.arrange(grobs = plot_matrix, ncol = 2)
+```
+No linear relationships observed among numerical predictors and target variable. Also, the distribution of the target variable, price in logarithm scale found left skewed.
+
+
+```{r}
+# Plot frequency distribution of categorical variables: status, city and state
+ggplot(house_price1, aes(x = status)) +
+  geom_bar() +
+  labs(title = "Frequency Distribution of Status")
+
+#ggplot(house_price1, aes(x = city)) +
+ # geom_bar() +
+  #labs(title = "Frequency Distribution of City")+
+#theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot(house_price1, aes(x = state)) +
+  geom_bar() +
+  labs(title = "Frequency Distribution of State")+
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+```
+
+```{r}
+## Checking outliers
+
+# Specify numerical predictors
+numeric_predictors01 <- c("bed", "bath", "acre_lot", "zip_code", "house_size", "price")
+
+# Create box plots for each numerical predictor
+for (predictor in numeric_predictors01) {
+  p<-ggplot(house_price1, aes(x = "", y = house_price1[[predictor]])) +
+    geom_boxplot() +
+    labs(title = paste("Box Plot of", predictor),
+         y = predictor) +
+    theme_minimal() +
+    theme(axis.text.x=element_blank()) 
+print(p)
+}
+
+```
+
+The wide spread of each numerical variable suggests the presence of potential outliers. However, it's important to note that this type of spread is common in real estate data from Realtor. Realtor listings encompass not only typical residential houses but also include commercial properties, vacant lands, and more, which can contribute to such variability. Therefore, all the data points will be kept in this analysis.     
+
+# Cehcking correlations among predictors
+
+```{r}
+# Specify numerical predictors 
+numeric_predictors1 <- house_price1[, c("bed", "bath", "acre_lot", "house_size", "zip_code")]
+
+# Calculate correlation matrix
+cor_matrix <- cor(is.na(numeric_predictors1))
+
+# See correlation matrix
+print(cor_matrix)
+
+```
+The variables, bed and bath reflect a strong positive correlation (0.875), suggesting that houses with more bedrooms tend to have more bathrooms. Additionally, there is a moderate positive correlation between bed and house size (0.503) and between bath and house size (0.490). These correlations indicate that as the number of bedrooms and bathrooms increases, the size of the house tends to be larger.Moreover, acre lot exhibits a weak negative correlation (-0.194) with bath, indicating that larger lots may have fewer bathrooms. Notably, the variable zip code shows minimal correlation with the other variables in the dataset.
+
+# Data preparation
+
+```{r}
+# Remove prev_sold_date column 
+house_price <- subset(house_price1, select = -prev_sold_date)
+
+# See missing values
+missing_values1 <- colSums(is.na(house_price))
+print(missing_values1)
+
+# Remove rows with missing values in specified columns
+house_price <- house_price[complete.cases(house_price$city, house_price$zip_code, house_price$price), ]
+
+# Calculate mean values for bed, bath, acre_lot and house_size variables
+mean_bed <- mean(house_price$bed, na.rm = TRUE)
+mean_bath <- mean(house_price$bath, na.rm = TRUE)
+mean_acre_lot <- mean(house_price$acre_lot, na.rm = TRUE)
+mean_house_size <- mean(house_price$house_size, na.rm = TRUE)
+
+# Replace missing values with mean values
+house_price$bed[is.na(house_price$bed)] <- mean_bed
+house_price$bath[is.na(house_price$bath)] <- mean_bath
+house_price$acre_lot[is.na(house_price$acre_lot)] <- mean_acre_lot
+house_price$house_size[is.na(house_price$house_size)] <- mean_house_size
+
+# See missing values again
+missing_values2 <- colSums(is.na(house_price))
+print(missing_values2)
+
+## Now the dataset is ready for modeling
+head(house_price)
+
+```
+
+The final house price data has been prepared by addressing missing values by imputing the average value for numerical variables and removing missing entries for categorical variables. This approach seemed to me reasonable as the missing values were small in proportion (0.2% missing data) in categorical variables compared to the missing values in numerical variables. It is noted that the numerical predictor, ‘previous sold date’ was not utilized in the analysis due to its large number of missing values. 
+
+```{r}
+# Specify numerical predictors
+numerical_predictors1 <- c("bed", "bath", "acre_lot","zip_code","house_size")
+
+# Create a matrix layout for plots
+plot_matrix1 <- lapply(numerical_predictors1, function(predictor) {
+  ggplot(house_price, aes_string(x = predictor, y = "price")) +
+    geom_point() +
+    labs(title = paste("Scatter plot of", predictor, "vs. price"),
+         x = predictor,
+         y = "Price")
+})
+
+# Plot scatter plots in a single plot 
+gridExtra::grid.arrange(grobs = plot_matrix1, ncol = 2)
+```
+After imputing missing values, scatter plots for numerical are plotted again. There is no evidence of linear relationships found between various predictors and the target variable, rather, complex nonlinear relationships are found. Therefore, linear regression modeling will not be appropriate for predicting housing prices. In this case, a decision tree/random forest model is a good choice to create to capture the complex non-linear relationships between the predictors and the target variable.
+
+```{r}
+# Select numerical variables
+numeric_vars2 <- house_price[, c("bed", "bath", "acre_lot", "house_size", "zip_code")]
+
+# Calculate correlation matrix
+cor_matrix2 <- cor(numeric_vars2, use = "pairwise.complete.obs")
+print(cor_matrix2)
+#glimpse(house_price)
+```
+After imputing missing values, correlation coefficients among predictors are determined again. Only, a strong positive correlation is found between the number of beds and the number of baths. No other significant correlations are found among other predictors.  
+
+# Split data into train and test datasets
+
+```{r}
+# Set seed 
+set.seed(123)
+
+# Split the data into training (70%) and testing (30%) sets
+train_index <- createDataPartition(house_price$price, p = 0.70, list = FALSE)
+train_data <- house_price[train_index, ]
+test_data <- house_price[-train_index, ]
+
+```
+
+The first dataset is divided into training and testing sets using a 70-30 split ratio. Two models, one decision tree, and one random forest, will be constructed using the training data.
+
+# Build models and make predictions
+
+```{r}
+## Build decision tree model
+
+#model1 <- rpart(price ~ status + bed + bath + acre_lot + city + state + zip_code + house_size, data = train_data)
+
+#model1 <- rpart(price ~ status + bed + bath + acre_lot + state + zip_code + house_size, data = train_data)
+
+model1 <- rpart(price ~ status + bed + bath + acre_lot + zip_code + house_size, data = train_data)
+
+# Make predictions on test dataset
+dt_predictions <- predict(model1, test_data)
+
+### Error in model.frame.default(Terms, newdata, na.action = na.action, xlev = attr(object,  : 
+## factor city has new levels Absecon Highlands, Allenwood, Annandale, Bass River, Berkeley Township, Black Brook, Bowdoin, Brig
+
+###Error in model.frame.default(Terms, newdata, na.action = na.action, xlev = attr(object,  : 
+  ##factor state has new levels Tennesse
+
+```
+
+The initial decision tree model, constructed using 8 predictors, encounters an issue when attempting to predict unseen data. An error arises due to mismatched levels in the "city" categorical variable between the training and test datasets post-splitting. Similarly, a second decision tree model, built with 7 predictors, encounters a different error message during prediction on unseen data. This time, the error indicates the presence of new levels in the "state" categorical variable that were not encountered during model training. I was unable to address these issues,so I decided to build another decision tree model without considering categorical variables: city and status. I have realized that a decision tree model may not perform optimally when dataset has categorical variables with a large number of labels.  
+
+
+```{r}
+# Build random forest model
+model <- randomForest(price ~ status + bed + bath + acre_lot +city+ state + zip_code + house_size, data = train_data)
+
+# Make predictions on test dataset
+rf_predictions1 <- predict(model, test_data)
+
+```
+
+
+# Model Evaluation:
+
+```{r}
+## Evaluate decision tree model
+
+# Calculate mean absolute error
+mae1 <- mean(abs(dt_predictions - test_data$price))
+print(paste("Decision tree Mean Absolute Error:", mae1))
+
+# Calculate RMSE
+rmse1 <- sqrt(mean((dt_predictions - test_data$price)^2))
+print(paste("Decision tree Root Mean Squared Error (RMSE):", rmse1))
+
+# Calculate R-squared
+dt_r_squared <- cor(dt_predictions, test_data$price)^2
+print(paste("Decision tree R-Squared:", dt_r_squared))
+
+
+## Evaluate random forest model
+
+# Calculate mean absolute error
+rf1_mae <- mean(abs(rf_predictions1 - test_data$price))
+print(paste("Random Forest Mean Absolute Error:", rf1_mae))
+
+# Calculate RMSE
+rf1_rmse <- sqrt(mean((rf_predictions1 - test_data$price)^2))
+print(paste("Random Forest Root Mean Squared Error (RMSE):", rf1_rmse))
+
+# Calculate R-squared
+rf1_r_squared <- cor(rf_predictions1, test_data$price)^2
+print(paste("Random Forest R-Squared:", rf1_r_squared))
+
+```
+Based on the performance metrics, the random forest model outperforms the decision tree model. It achieves a lower Mean Absolute Error (MAE) compared to the decision tree model. Similarly, the Root Mean Squared Error (RMSE) is found substantially lower for the random forest model compared to the decision tree model. Additionally, the random forest model exhibits a higher R-Squared value compared to the decision tree, indicating better explanatory power. Therefore, the random forest model is found to be more reliable for business use due to its superior predictive performance.
+
+
+# Get second dataset
+
+```{r}
+house_price_data02<-read.csv("F:\\CUNY masters\\Data 622\\HW1\\USA_Housing.csv",header=TRUE,sep=",")
+#head(house_price_data02)
+```
+
+
+# Second dataset exploration
+
+```{r}
+glimpse(house_price_data02)
+
+# Summary statistics of the data
+print(summary(house_price_data02))
+
+# See missing values separately 
+missing_values02 <- colSums(is.na(house_price_data02))
+print(missing_values02)
+
+num_label<-print(length(unique(house_price_data02$Address)))
+```
+The dataset has 5000 rows and 7 columns (variables). The dataset contains 6 numerical variables and one categorical variable with 5000 distinct labels (addresses). The dataset summary reveals significant variation across multiple variables. The Avg. Area Income ranges from 17,797 US dollar to 107,702 US dollar with an average of 68,583 US dollar, the Avg. Area House Age ranges from 2.64 to 9.52 years, with an average of 5.98 years, the Avg. Area Number of Rooms fluctuates from 3.24 to 10.76, averaging around 6.988 rooms. Also, the Avg. Area Number of Bedrooms ranges from 2.0 to 6.50 with an average of 3.98 bedrooms, the Area Population varies widely from 172.60 to 69,621.70 residents, averaging about 36,163.50. Moreover, the house prices exhibit a broad range, from 15,94 US dollar to 2,469,066 US dollar with an average of approximately 1,232,073 US dollar. Additionally, no missing values found in the the second dataset.
+
+```{r}
+# Specify numerical predictors
+numerical_predictors2 <- c("Avg..Area.Income", "Avg..Area.House.Age ", "Avg..Area.Number.of.Rooms", "Avg..Area.Number.of.Bedrooms", "Area.Population")
+
+# Create matrix layout for the plots
+plot_matrix2 <- lapply(numerical_predictors2, function(predictor) {
+  ggplot(house_price_data02, aes_string(x = predictor, y = "Price")) +
+    geom_point() +
+    labs(title = paste("Scatter plot of", predictor, "vs. price"),
+         x = predictor,
+         y = "Price")
+})
+
+# Plot scatter plots in a single plot
+gridExtra::grid.arrange(grobs = plot_matrix2, ncol = 2)
+
+# Plot histogram for target variable, Price 
+hist(house_price_data02$Price,main = "Histogram of House Price", xlab = "Price", ylab = "Frequency")
+```
+The scatter plots for numerical variables (predictors) exhibit linear relationships with the target variable, price, except the variable: average area number of number of bedrooms.This variable exhibits clustered data points indicating a complex and non-linear relationship with the target variable.This time I will build a multiple linear regression model and a random forest model to capture the relationships between predictors and the target variable. Also, I will try to understand which model works well with the underlying relationships and complexity of this data.  
+
+```{r}
+# Select predictors of interest
+numeric_predictors <- c("Avg..Area.Income", "Avg..Area.House.Age", "Avg..Area.Number.of.Rooms", 
+                "Avg..Area.Number.of.Bedrooms", "Area.Population")
+
+# Determine correlation matrix
+corr_matrix02<- cor(house_price_data02[numeric_predictors])
+
+# See correlation matrix
+print(corr_matrix02)
+
+```
+A moderately strong positive linear relationship is found between the average number of bedrooms and average number of rooms. No other significant correlations are found among other predictors reflecting absence of significant multi-collinearity in the data.
+
+# Data Preparation:
+
+```{r}
+# Rename columns
+house_price_data02 <- house_price_data02 %>%
+  rename(avg_area_income = "Avg..Area.Income",
+         avg_area_house_age = "Avg..Area.House.Age",
+         avg_area_num_rooms = "Avg..Area.Number.of.Rooms",
+         avg_area_num_bedrooms ="Avg..Area.Number.of.Bedrooms",
+         area_population = "Area.Population",
+         price = "Price",
+         address="Address")
+
+# Split data into train (70%) and test (30%) sets
+set.seed(123)
+train_index2 <- createDataPartition(house_price_data02$price, p = 0.7, list = FALSE)
+train_data2 <- house_price_data02[train_index2, ]
+test_data2 <- house_price_data02[-train_index2, ]
+```
+
+The data has been prepared by renaming the columns and splitting the dataset into train and test data with a 70 to 30 percent ratio.  
+
+# Build models and make predictions
+
+```{r}
+## Build Multiple Linear Regression Model
+
+#lm_model <- lm(price ~ avg_area_income + avg_area_house_age + avg_area_num_rooms++ avg_area_num_bedrooms + area_population+address, data = train_data2)
+
+lm_model <- lm(price ~ avg_area_income + avg_area_house_age + avg_area_num_rooms++ avg_area_num_bedrooms + area_population, data = train_data2)
+
+summary(lm_model)
+
+# Predict on test data
+lm_predictions <- predict(lm_model, newdata = test_data2)
+
+# See 50 predicted values
+head(lm_predictions,50)
+
+## Build Random Forest Model
+rf_model2 <- randomForest(price ~ avg_area_income + avg_area_house_age + avg_area_num_rooms + avg_area_num_bedrooms + area_population+ address, data = train_data2)
+
+# Predict on test data
+rf2_predictions <- predict(rf_model2, newdata = test_data2)
+
+# See 50 predicted values
+head(rf2_predictions,50)
+
+#Error in model.frame.default(Terms, newdata, na.action = na.action, xlev = object$xlevels) : 
+  #factor address has new levels 000 Adkins Crescent
+#South Teresa, AS 49642-1348, 000 Todd Pines.....
+```
+Considering the p value of 0.15, the average number of bedrooms is found to be an insignificant predictor of housing price, which seemed to me unrealistic.Also,the linear regression model has encountered an issue when attempting to predict unseen data. An error arises due to mismatched levels in the "address" categorical variable between the training and test datasets post-splitting. As a consequence, I have excluded the address predictor to build the linear model. But this predictor plays a key role of determining housing price in real life scenario.   
+ 
+# Model evaluation
+
+```{r}
+
+## Evaluate Multiple Linear Regression model
+lm_rmse <- sqrt(mean((lm_predictions - test_data2$price)^2))
+print(paste("Multiple Linear Regression RMSE:", lm_rmse))
+
+# Calculate R-squared
+lm_r_squared <- summary(lm_model)$r.squared
+print(paste("Multiple Linear Regression R-Squared:", lm_r_squared))
+
+# Calculate MAE
+lm_mae <- mean(abs(lm_predictions - test_data2$price))
+print(paste("Multiple Linear Regression MAE:", lm_mae))
+
+## Evaluate Random Forest Model
+rf2_rmse <- sqrt(mean((rf2_predictions - test_data2$price)^2))
+print(paste("Random Forest RMSE:", rf2_rmse))
+
+# Calculate R-squared
+rf2_r_squared <- cor(rf2_predictions, test_data2$price)^2
+print(paste("Random Forest R-Squared:", rf2_r_squared))
+
+# Calculate MAE
+rf2_mae <- mean(abs(rf2_predictions - test_data2$price))
+print(paste("Random Forest MAE:", rf2_mae))
+```
+The performance matrices of multiple linear regression and random forest models reveal that the multiple linear regression model achieves a lower Root Mean Squared Error (RMSE), higher R-squared, and lower Mean Absolute Error(MAE)) compared to the random forest model. Though the linear model outperforms the random forest model, the latter is recommended for business purposes. This recommendation is due to the random forest model's inclusion of important predictors such as the number of bedrooms, which the linear regression model shows insignificant. Additionally, the linear model overlooks the significant predictor "address," which is limiting its ability to capture important relationships within the dataset.Therefore, even though the random forest model's performance measures are a bit lower, I prefer it because it looks at all the important factors needed to predict housing prices accurately.
+
+# Conclusion
+
+For the first dataset, the analysis reveals that the random forest model outperforms the decision tree model based on performance metrics.Therefore, the random forest model is deemed more reliable for business use due to its superior predictive performance. Conversely, in case of the second dataset, even though the random forest model's performance measures are a bit lower compared to the linear regression model, I prefer the random forest model for business purposes because it considers all the important factors necessary for predicting housing prices. Overall, this analysis has given me significant insights of building, selecting, and analyzing predicting models to make informed business decisions. 
+
+
